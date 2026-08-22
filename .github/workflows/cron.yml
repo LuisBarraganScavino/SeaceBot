@@ -2,19 +2,21 @@ name: Evaluador SEACE
 
 on:
   schedule:
-    # Se ejecuta de lunes a viernes en horario laboral peruano (8:00 AM, 11:00 AM, 2:00 PM y 5:00 PM)
     - cron: '0 13,16,19,22 * * 1-5'
-  workflow_dispatch: # Permite ejecutar el rastreador manualmente para probar
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   check-seace:
     runs-on: ubuntu-latest
     steps:
       - name: Descargar Código
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configurar Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -31,6 +33,6 @@ jobs:
         run: |
           git config --global user.name "SEACE-Bot"
           git config --global user.email "bot@github.com"
-          git add processed_ids.json
+          git add processed_ids.json || true
           git commit -m "Actualizar historial de alertas" || exit 0
           git push
