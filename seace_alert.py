@@ -1,36 +1,62 @@
-name: Evaluador SEACE
+import os
+import json
+import requests
 
-on:
-  schedule:
-    # Se ejecuta de lunes a viernes cada 3 horas en horario laboral peruano
-    - cron: '0 13,16,19,22 * * 1-5'
-  workflow_dispatch:
+# Credenciales de Telegram desde los Secretos de GitHub
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-jobs:
-  check-seace:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Descargar Código
-        uses: actions/checkout@v3
+# Palabras clave de búsqueda para productos Alda
+KEYWORDS = ["cartera", "correa", "calzado", "zapato", "cartapacio", "agenda", "escritorio", "cuero"]
 
-      - name: Configurar Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+def send_telegram_alert(proceso):
+    """Envía la notificación formateada a Telegram."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ Advertencia: No se encontraron las credenciales de Telegram.")
+        return
 
-      - name: Instalar Dependencias
-        run: pip install requests
+    mensaje = (
+        f"🚨 *NUEVO PROCESO SEACE DETECTADO*\n\n"
+        f"🏢 *Entidad:* {proceso.get('entidad', 'N/A')}\n"
+        f"📋 *Objeto:* {proceso.get('descripcion', 'N/A')}\n"
+        f"💰 *Monto Ref.:* S/ {proceso.get('monto', 'N/A')}\n\n"
+        f"🔗 [Acceder al Buscador SEACE](https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml)"
+    )
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensaje,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
+    }
+    response = requests.post(url, json=payload)
+    if response.status_code == 200:
+        print("✅ Alerta enviada a Telegram con éxito.")
+    else:
+        print(f"❌ Error al enviar a Telegram: {response.text}")
 
-      - name: Ejecutar Rastreador
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python seace_alert.py
+def main():
+    print("🔎 Iniciando rastreador de licitaciones del SEACE...")
+    
+    # Cargar historial de notificados
+    history_file = "processed_ids.json"
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, "r") as f:
+                processed_ids = set(json.load(f))
+        except Exception:
+            processed_ids = set()
+    else:
+        processed_ids = set()
 
-      - name: Guardar Registro de Vistos
-        run: |
-          git config --global user.name "SEACE-Bot"
-          git config --global user.email "bot@github.com"
-          git add processed_ids.json
-          git commit -m "Update processed IDs" || exit 0
-          git push
+    print(f"Buscando licitaciones para: {', '.join(KEYWORDS)}")
+    
+    # Guardar historial actualizado
+    with open(history_file, "w") as f:
+        json.dump(list(processed_ids), f)
+        
+    print("✅ Proceso completado sin errores.")
+
+if __name__ == "__main__":
+    main()
