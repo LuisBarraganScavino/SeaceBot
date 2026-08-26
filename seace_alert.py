@@ -6,20 +6,18 @@ from playwright.sync_api import sync_playwright
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Sombrilla de Cobertura Total para productos Alda e indumentaria estatal
+# Palabras clave ATÓMICAS (de 1 solo término) para asegurar coincidencia directa en el SEACE
 KEYWORDS = [
-    "cartera", "correa", "calzado", "zapato", "cartapacio", 
-    "agenda", "escritorio", "cuero", "marroquineria", "talabarteria",
-    "billetera", "cinturon", "maletin", "mochila",
-    "accesorios de invierno", "accesorios de vestir", "accesorios de uniformes",
-    "uniforme", "vestuario", "indumentaria", "dotacion", 
-    "confeccion", "prendas de vestir", "textil"
+    "accesorios", "uniforme", "vestuario", "indumentaria", 
+    "calzado", "zapato", "cartera", "correa", "cuero", 
+    "marroquineria", "talabarteria", "billetera", "cinturon", 
+    "maletin", "mochila", "dotacion", "confeccion", "minem"
 ]
 
 SEACE_PORTAL_URL = "https://prodapp2.seace.gob.pe/seace3-public/"
 
 def send_telegram_alert(proceso):
-    """Envía la alerta incluyendo la fecha límite de presentación de ofertas."""
+    """Envía la alerta a Telegram."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
@@ -28,7 +26,6 @@ def send_telegram_alert(proceso):
         f"🏢 *Entidad:* {proceso.get('entidad', 'N/A')}\n"
         f"📋 *Objeto:* {proceso.get('descripcion', 'N/A')}\n"
         f"💰 *Monto Ref.:* S/ {proceso.get('monto', 'N/A')}\n"
-        f"📅 *Presentación de Ofertas:* *{proceso.get('fecha_presentacion', 'Consultar Bases')}*\n"
         f"🔑 *Filtro Coincidente:* `{proceso.get('keyword', 'N/A')}`\n\n"
         f"🔗 [Acceder al Buscador SEACE]({SEACE_PORTAL_URL})"
     )
@@ -47,7 +44,7 @@ def send_telegram_alert(proceso):
         print(f"❌ Error al enviar mensaje: {e}")
 
 def main():
-    print("🔎 Iniciando rastreador con navegador virtual (Playwright)...")
+    print("🔎 Iniciando rastreador dinámico en el SEACE...")
     
     history_file = "processed_ids.json"
     if os.path.exists(history_file):
@@ -61,46 +58,53 @@ def main():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context(ignore_https_errors=True)
+        page = context.new_page()
         
         for kw in KEYWORDS:
-            print(f"📡 Buscando en SEACE: '{kw}'...")
+            print(f"📡 Buscando en SEACE el término: '{kw}'...")
             try:
-                page.goto("https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml", timeout=40000, wait_until="domcontentloaded")
+                page.goto("https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml", timeout=60000, wait_until="domcontentloaded")
                 page.wait_for_timeout(2000)
                 
-                # Rellenar descripción del objeto
-                input_selector = "input[id*='tbDescripcion'], input[id*='txtObjeto'], input[id*='descripcion']"
-                if page.locator(input_selector).count() > 0:
-                    page.fill(input_selector, kw)
+                # Rellenar campo de descripción
+                inp = page.locator("input[id*='tbDescripcion'], input[id*='txtObjeto']").first
+                if inp.is_visible():
+                    inp.fill(kw)
                     page.wait_for_timeout(500)
                     
-                    # Presionar botón de búsqueda
-                    btn_selector = "button[id*='btnBuscar'], input[id*='btnBuscar'], [value*='Buscar']"
-                    if page.locator(btn_selector).count() > 0:
-                        page.click(btn_selector)
-                        page.wait_for_timeout(4000)
-                
-                # Extraer filas de la tabla de resultados
-                rows = page.locator("tr.ui-widget-content").all()
-                for row in rows:
-                    text = row.inner_text()
-                    cols = text.split("\t") if "\t" in text else text.split("\n")
-                    if len(cols) >= 3:
-                        entidad = cols[1].strip() if len(cols) > 1 else "Entidad Estatal"
-                        desc = cols[2].strip() if len(cols) > 2 else "Objeto de contratación"
-                        fecha_pres = cols[4].strip() if len(cols) > 4 else "Vigente"
+                    # Clic en el botón Buscar
+                    btn = page.locator("button[id*='btnBuscar'], input[id*='btnBuscar'], button:has-text('Buscar')").first
+                    if btn.is_visible():
+                        btn.click()
+                        page.wait_for_timeout(4000) # Esperar respuesta AJAX
                         
-                        proc_id = f"{entidad}-{desc}"
-                        if proc_id not in processed_ids:
-                            send_telegram_alert({
-                                "entidad": entidad,
-                                "descripcion": desc,
-                                "monto": "Consultar Ficha",
-                                "fecha_presentacion": fecha_pres,
-                                "keyword": kw
-                            })
-                            processed_ids.add(proc_id)
+                        # Extraer filas resultantes
+                        rows = page.locator("tbody[id*='tbProcesos'] tr, tbody[id*='dtProcesos'] tr, tr.ui-widget-content").all()
+                        print(f"   📊 Filas detectadas para '{kw}': {len(rows)}")
+                        
+                        for row in rows:
+                            text = row.inner_text().strip()
+                            if not text or "No se encontraron registros" in text or "Sin datos" in text:
+                                continue
+                                
+                            cols = [c.strip() for c in text.split("\t") if c.strip()]
+                            if len(cols) < 2:
+                                cols = [c.strip() for c in text.split("\n") if c.strip()]
+                                
+                            if len(cols) >= 2:
+                                entidad = cols[1] if len(cols) > 1 else "Entidad Estatal"
+                                desc = cols[2] if len(cols) > 2 else cols[0]
+                                
+                                proc_id = f"{entidad}-{desc}"
+                                if proc_id not in processed_ids:
+                                    send_telegram_alert({
+                                        "entidad": entidad,
+                                        "descripcion": desc,
+                                        "monto": "Consultar Ficha",
+                                        "keyword": kw
+                                    })
+                                    processed_ids.add(proc_id)
             except Exception as e:
                 print(f"⚠️ Error procesando '{kw}': {e}")
         
@@ -109,7 +113,7 @@ def main():
     with open(history_file, "w") as f:
         json.dump(list(processed_ids), f)
         
-    print("✅ Escaneo de licitaciones vigentes completado.")
+    print("✅ Escaneo completado.")
 
 if __name__ == "__main__":
     main()
