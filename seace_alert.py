@@ -30,14 +30,26 @@ def send_telegram_alert(proceso):
         "parse_mode": "Markdown",
         "disable_web_page_preview": True
     }
-    response = requests.post(url, json=payload)
-    if response.status_code == 200:
-        print("✅ Alerta enviada a Telegram con éxito.")
-    else:
-        print(f"❌ Error al enviar a Telegram: {response.text}")
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code == 200:
+            print("✅ Alerta enviada a Telegram con éxito.")
+        else:
+            print(f"❌ Error al enviar a Telegram: {response.text}")
+    except Exception as e:
+        print(f"❌ Error de conexión con Telegram: {e}")
 
 def main():
     print("🔎 Iniciando rastreador de licitaciones del SEACE...")
+    
+    # --- ENVÍO DE ALERTA DE PRUEBA ---
+    print("🚀 Enviando notificación de prueba a Telegram...")
+    send_telegram_alert({
+        "entidad": "PRUEBA DE SISTEMA - ALDA / BIG DATA S.A.C.",
+        "descripcion": "Licitación de Prueba: Carteras y Correas de Cuero Vacuno",
+        "monto": "25,000.00"
+    })
+    # ---------------------------------
     
     # Cargar historial de notificados
     history_file = "processed_ids.json"
