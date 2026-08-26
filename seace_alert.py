@@ -9,6 +9,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # Palabras clave de búsqueda para productos Alda
 KEYWORDS = ["cartera", "correa", "calzado", "zapato", "cartapacio", "agenda", "escritorio", "cuero"]
 
+# Portal de acceso público compatible con navegadores móviles
+SEACE_PORTAL_URL = "https://prodapp2.seace.gob.pe/seace3-public/"
+
 def send_telegram_alert(proceso):
     """Envía la notificación formateada a Telegram."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -20,7 +23,7 @@ def send_telegram_alert(proceso):
         f"🏢 *Entidad:* {proceso.get('entidad', 'N/A')}\n"
         f"📋 *Objeto:* {proceso.get('descripcion', 'N/A')}\n"
         f"💰 *Monto Ref.:* S/ {proceso.get('monto', 'N/A')}\n\n"
-        f"🔗 [Acceder al Buscador SEACE](https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml)"
+        f"🔗 [Acceder al Buscador SEACE]({SEACE_PORTAL_URL})"
     )
     
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -41,15 +44,6 @@ def send_telegram_alert(proceso):
 
 def main():
     print("🔎 Iniciando rastreador de licitaciones del SEACE...")
-    
-    # --- ENVÍO DE ALERTA DE PRUEBA ---
-    print("🚀 Enviando notificación de prueba a Telegram...")
-    send_telegram_alert({
-        "entidad": "PRUEBA DE SISTEMA - ALDA / BIG DATA S.A.C.",
-        "descripcion": "Licitación de Prueba: Carteras y Correas de Cuero Vacuno",
-        "monto": "25,000.00"
-    })
-    # ---------------------------------
     
     # Cargar historial de notificados
     history_file = "processed_ids.json"
