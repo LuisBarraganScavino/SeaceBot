@@ -1,17 +1,12 @@
 import os
 import json
-import re
 import requests
-import urllib3
-from bs4 import BeautifulSoup
-
-# Desactivar advertencias de SSL para el servidor del SEACE
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from playwright.sync_api import sync_playwright
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Sombrilla de palabras clave para productos Alda y licitaciones generales
+# Sombrilla de Cobertura Total para productos Alda e indumentaria estatal
 KEYWORDS = [
     "cartera", "correa", "calzado", "zapato", "cartapacio", 
     "agenda", "escritorio", "cuero", "marroquineria", "talabarteria",
@@ -24,7 +19,7 @@ KEYWORDS = [
 SEACE_PORTAL_URL = "https://prodapp2.seace.gob.pe/seace3-public/"
 
 def send_telegram_alert(proceso):
-    """Envía la alerta incluyendo la fecha de presentación de ofertas."""
+    """Envía la alerta incluyendo la fecha límite de presentación de ofertas."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
@@ -51,44 +46,8 @@ def send_telegram_alert(proceso):
     except Exception as e:
         print(f"❌ Error al enviar mensaje: {e}")
 
-def query_active_seace_processes(keyword):
-    """Escanea los procesos en etapa activa de presentación de propuestas."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    found_processes = []
-    try:
-        url = "https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml"
-        params = {"descripcion": keyword, "tipoObjeto": "1"}
-        response = requests.get(url, headers=headers, params=params, timeout=15, verify=False)
-        
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            # Buscar filas de la tabla de resultados del SEACE
-            rows = soup.find_all('tr', class_=re.compile(r'ui-widget-content'))
-            
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 5:
-                    entidad = cols[1].text.strip()
-                    descripcion = cols[2].text.strip()
-                    fecha_propuestas = cols[4].text.strip() if len(cols) > 4 else "Vigente"
-                    proceso_id = f"{entidad}-{descripcion}"
-                    
-                    found_processes.append({
-                        "id": proceso_id,
-                        "entidad": entidad,
-                        "descripcion": descripcion,
-                        "monto": "Consultar Ficha",
-                        "fecha_presentacion": fecha_propuestas
-                    })
-    except Exception as e:
-        print(f"⚠️ Error escaneando término '{keyword}': {e}")
-        
-    return found_processes
-
 def main():
-    print("🔎 Iniciando rastreo de licitaciones vigentes en el SEACE...")
+    print("🔎 Iniciando rastreador con navegador virtual (Playwright)...")
     
     history_file = "processed_ids.json"
     if os.path.exists(history_file):
@@ -100,16 +59,52 @@ def main():
     else:
         processed_ids = set()
 
-    print(f"📡 Escaneando {len(KEYWORDS)} filtros en búsqueda de propuestas activas...")
-    
-    for kw in KEYWORDS:
-        procesos = query_active_seace_processes(kw)
-        for proc in procesos:
-            proc_id = proc.get("id")
-            if proc_id and proc_id not in processed_ids:
-                proc["keyword"] = kw
-                send_telegram_alert(proc)
-                processed_ids.add(proc_id)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        
+        for kw in KEYWORDS:
+            print(f"📡 Buscando en SEACE: '{kw}'...")
+            try:
+                page.goto("https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml", timeout=40000, wait_until="domcontentloaded")
+                page.wait_for_timeout(2000)
+                
+                # Rellenar descripción del objeto
+                input_selector = "input[id*='tbDescripcion'], input[id*='txtObjeto'], input[id*='descripcion']"
+                if page.locator(input_selector).count() > 0:
+                    page.fill(input_selector, kw)
+                    page.wait_for_timeout(500)
+                    
+                    # Presionar botón de búsqueda
+                    btn_selector = "button[id*='btnBuscar'], input[id*='btnBuscar'], [value*='Buscar']"
+                    if page.locator(btn_selector).count() > 0:
+                        page.click(btn_selector)
+                        page.wait_for_timeout(4000)
+                
+                # Extraer filas de la tabla de resultados
+                rows = page.locator("tr.ui-widget-content").all()
+                for row in rows:
+                    text = row.inner_text()
+                    cols = text.split("\t") if "\t" in text else text.split("\n")
+                    if len(cols) >= 3:
+                        entidad = cols[1].strip() if len(cols) > 1 else "Entidad Estatal"
+                        desc = cols[2].strip() if len(cols) > 2 else "Objeto de contratación"
+                        fecha_pres = cols[4].strip() if len(cols) > 4 else "Vigente"
+                        
+                        proc_id = f"{entidad}-{desc}"
+                        if proc_id not in processed_ids:
+                            send_telegram_alert({
+                                "entidad": entidad,
+                                "descripcion": desc,
+                                "monto": "Consultar Ficha",
+                                "fecha_presentacion": fecha_pres,
+                                "keyword": kw
+                            })
+                            processed_ids.add(proc_id)
+            except Exception as e:
+                print(f"⚠️ Error procesando '{kw}': {e}")
+        
+        browser.close()
 
     with open(history_file, "w") as f:
         json.dump(list(processed_ids), f)
