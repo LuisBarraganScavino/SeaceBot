@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Palabras clave estratégicas para detectar vestuario, calzado y accesorios de Alda
+# Palabras clave estratégicas para detectar vestuario, calzado y accesorios
 KEYWORDS = [
     "accesorios", "uniforme", "vestuario", "indumentaria", 
     "calzado", "zapato", "cartera", "correa", "cuero", 
@@ -48,7 +48,7 @@ def send_telegram_alert(proceso):
         print(f"❌ Excepción de conexión a Telegram: {e}")
 
 def main():
-    print("🔎 Iniciando rastreo adaptativo con Playwright en SEACE 3.0...")
+    print("🔎 Iniciando navegador virtual con evasión de bloqueos en SEACE 3.0...")
     
     history_file = "processed_ids.json"
     if os.path.exists(history_file):
@@ -61,52 +61,64 @@ def main():
         processed_ids = set()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # Lanzar Chromium desactivando banderas de automatización
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled"
+            ]
+        )
         context = browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 768},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             ignore_https_errors=True
         )
+        
         page = context.new_page()
+        # Ocultar indicador de automatización en JS
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+        print("🌐 Cargando portal del SEACE...")
+        try:
+            page.goto("https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml", timeout=60000)
+            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(3000)
+        except Exception as e:
+            print(f"⚠️ Error al cargar la página principal: {e}")
 
         for kw in KEYWORDS:
-            print(f"\n📡 Escaneando SEACE para el término: '{kw}'...")
+            print(f"\n📡 Escaneando término: '{kw}'...")
             try:
-                page.goto("https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml", timeout=60000)
-                page.wait_for_load_state("domcontentloaded")
-                page.wait_for_timeout(3000)
-
-                # Identificar marco activo o página principal
-                target_frame = page
-                for frame in page.frames:
-                    if frame.locator("input").count() > 0:
-                        target_frame = frame
-                        break
-
-                # Localizar el cuadro de texto habilitado
-                inputs = target_frame.locator("input[type='text'], input.ui-inputfield").all()
-                found_input = None
+                # Localizar todos los campos de texto visibles
+                inputs = page.locator("input[type='text'], input.ui-inputfield").all()
+                target_input = None
                 for inp in inputs:
                     if inp.is_visible() and inp.is_enabled():
-                        found_input = inp
+                        target_input = inp
                         break
 
-                if found_input:
-                    found_input.fill(kw)
+                if target_input:
+                    # Limpiar y rellenar
+                    target_input.click()
+                    target_input.fill("")
+                    page.wait_for_timeout(300)
+                    target_input.fill(kw)
                     page.wait_for_timeout(500)
 
-                    # Presionar botón de búsqueda o forzar Enter
-                    btn = target_frame.locator("button:has-text('Buscar'), input[value*='Buscar'], .ui-button:has-text('Buscar')").first
+                    # Buscar el botón de búsqueda
+                    btn = page.locator("button:has-text('Buscar'), input[value*='Buscar'], .ui-button:has-text('Buscar')").first
                     if btn.is_visible():
                         btn.click()
                     else:
-                        found_input.press("Enter")
-                    
-                    page.wait_for_timeout(5000)
+                        target_input.press("Enter")
 
-                    # Leer filas de la tabla
-                    rows = target_frame.locator("tr.ui-widget-content").all()
-                    print(f"   📊 Filas detectadas en tabla: {len(rows)}")
+                    page.wait_for_timeout(4000) # Esperar respuesta AJAX
+
+                    # Inspeccionar resultados
+                    rows = page.locator("tr.ui-widget-content").all()
+                    print(f"   📊 Filas detectadas en la tabla: {len(rows)}")
 
                     for row in rows:
                         text = row.inner_text().strip()
@@ -129,17 +141,19 @@ def main():
                                 })
                                 processed_ids.add(proc_id)
                 else:
-                    print("   ⚠️ No se encontró ningún campo de texto activo para escribir.")
+                    print("   ⚠️ Reintentando recargar el formulario...")
+                    page.goto("https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml", timeout=30000)
+                    page.wait_for_timeout(3000)
 
             except Exception as e:
-                print(f"   ⚠️ Error en consulta de '{kw}': {e}")
+                print(f"   ⚠️ Error en la consulta del término '{kw}': {e}")
 
         browser.close()
 
     with open(history_file, "w") as f:
         json.dump(list(processed_ids), f)
         
-    print("\n✅ Ejecución del Paso 1 finalizada.")
+    print("\n✅ Ejecución finalizada.")
 
 if __name__ == "__main__":
     main()
