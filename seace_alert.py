@@ -1,6 +1,10 @@
 import os
 import json
 import requests
+import urllib3
+
+# Desactivar advertencias de certificados SSL no verificados
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Credenciales de Telegram desde los Secretos de GitHub
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -19,7 +23,6 @@ KEYWORDS = [
     "confeccion", "prendas de vestir", "textil"
 ]
 
-# Portal público del SEACE compatible con navegadores móviles
 SEACE_PORTAL_URL = "https://prodapp2.seace.gob.pe/seace3-public/"
 
 def send_telegram_alert(proceso):
@@ -54,7 +57,7 @@ def send_telegram_alert(proceso):
         print(f"❌ Error de conexión: {e}")
 
 def query_seace_by_keyword(keyword):
-    """Consulta el portal del SEACE evitando errores por términos sin resultados."""
+    """Consulta el portal del SEACE omitiendo la verificación SSL estricta."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
@@ -62,10 +65,11 @@ def query_seace_by_keyword(keyword):
     try:
         url = "https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml"
         params = {"descripcion": keyword, "tipoObjeto": "1"}
-        response = requests.get(url, headers=headers, params=params, timeout=12)
+        # verify=False permite conectar omitiendo la falla del certificado estatal
+        response = requests.get(url, headers=headers, params=params, timeout=12, verify=False)
         
         if response.status_code == 200:
-            # Procesamiento de la respuesta HTML/JSON del buscador
+            # Procesamiento de la respuesta HTML/JSON
             pass
     except Exception as e:
         print(f"⚠️ No se pudo consultar el término '{keyword}': {e}")
@@ -75,7 +79,6 @@ def query_seace_by_keyword(keyword):
 def main():
     print("🔎 Iniciando rastreador de cobertura total para el SEACE...")
     
-    # Cargar historial de notificados para evitar envíos duplicados
     history_file = "processed_ids.json"
     if os.path.exists(history_file):
         try:
@@ -97,7 +100,7 @@ def main():
                 send_telegram_alert(proc)
                 processed_ids.add(proc_id)
 
-    # Guardar historial actualizado en el repositorio
+    # Guardar historial actualizado
     with open(history_file, "w") as f:
         json.dump(list(processed_ids), f)
         
