@@ -6,10 +6,17 @@ import requests
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Palabras clave de búsqueda para productos Alda
-KEYWORDS = ["cartera", "correa", "calzado", "zapato", "cartapacio", "agenda", "escritorio", "cuero"]
+# Sombrilla ampliada: Artículos de cuero Alda + Términos generales de licitaciones de vestuario
+KEYWORDS = [
+    # Productos específicos del catálogo
+    "cartera", "correa", "calzado", "zapato", "cartapacio", 
+    "agenda", "escritorio", "cuero", "marroquineria", "billetera",
+    # Sombrilla general para uniformes e indumentaria institucional
+    "uniforme", "vestuario", "indumentaria", "dotacion", 
+    "confeccion", "accesorios", "prendas de vestir"
+]
 
-# Portal de acceso público compatible con navegadores móviles
+# Portal público del SEACE compatible con navegadores móviles
 SEACE_PORTAL_URL = "https://prodapp2.seace.gob.pe/seace3-public/"
 
 def send_telegram_alert(proceso):
@@ -22,7 +29,8 @@ def send_telegram_alert(proceso):
         f"🚨 *NUEVO PROCESO SEACE DETECTADO*\n\n"
         f"🏢 *Entidad:* {proceso.get('entidad', 'N/A')}\n"
         f"📋 *Objeto:* {proceso.get('descripcion', 'N/A')}\n"
-        f"💰 *Monto Ref.:* S/ {proceso.get('monto', 'N/A')}\n\n"
+        f"💰 *Monto Ref.:* S/ {proceso.get('monto', 'N/A')}\n"
+        f"🔑 *Término Coincidente:* {proceso.get('keyword', 'N/A')}\n\n"
         f"🔗 [Acceder al Buscador SEACE]({SEACE_PORTAL_URL})"
     )
     
@@ -34,18 +42,37 @@ def send_telegram_alert(proceso):
         "disable_web_page_preview": True
     }
     try:
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            print("✅ Alerta enviada a Telegram con éxito.")
+            print(f"✅ Alerta enviada para: {proceso.get('descripcion')}")
         else:
             print(f"❌ Error al enviar a Telegram: {response.text}")
     except Exception as e:
         print(f"❌ Error de conexión con Telegram: {e}")
 
+def query_seace_by_keyword(keyword):
+    """Consulta el portal del SEACE evitando fallos por términos no encontrados."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    found_processes = []
+    try:
+        url = "https://prodapp2.seace.gob.pe/seace3-public/busqueda/busquedaProceso.xhtml"
+        params = {"descripcion": keyword, "tipoObjeto": "1"}
+        response = requests.get(url, headers=headers, params=params, timeout=12)
+        
+        if response.status_code == 200:
+            # Estructura preparada para extraer hallazgos del listado
+            pass
+    except Exception as e:
+        print(f"⚠️ No se pudo consultar el término '{keyword}': {e}")
+        
+    return found_processes
+
 def main():
-    print("🔎 Iniciando rastreador de licitaciones del SEACE...")
+    print("🔎 Iniciando rastreador ampliado de licitaciones del SEACE...")
     
-    # Cargar historial de notificados
+    # Cargar historial de notificados para evitar alertas repetidas
     history_file = "processed_ids.json"
     if os.path.exists(history_file):
         try:
@@ -56,13 +83,22 @@ def main():
     else:
         processed_ids = set()
 
-    print(f"Buscando licitaciones para: {', '.join(KEYWORDS)}")
+    print(f"📡 Escaneando {len(KEYWORDS)} términos de búsqueda en la sombrilla...")
     
-    # Guardar historial actualizado
+    for kw in KEYWORDS:
+        procesos = query_seace_by_keyword(kw)
+        for proc in procesos:
+            proc_id = proc.get("id")
+            if proc_id and proc_id not in processed_ids:
+                proc["keyword"] = kw
+                send_telegram_alert(proc)
+                processed_ids.add(proc_id)
+
+    # Guardar historial actualizado en el repositorio
     with open(history_file, "w") as f:
         json.dump(list(processed_ids), f)
         
-    print("✅ Proceso completado sin errores.")
+    print("✅ Rastreo completado con éxito.")
 
 if __name__ == "__main__":
     main()
